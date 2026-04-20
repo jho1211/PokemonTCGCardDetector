@@ -301,7 +301,13 @@ def main() -> int:
         )
 
         if args.strict:
-            card = response_dict.get("card") or {}
+            cards = response_dict.get("cards") or []
+            best_entry = {}
+            if isinstance(cards, list) and cards:
+                best_entry = next((item for item in cards if item.get("success")), cards[0])
+
+            card = best_entry.get("card") if isinstance(best_entry, dict) else {}
+            card = card if isinstance(card, dict) else {}
             full_checks.extend(
                 [
                     CheckResult(

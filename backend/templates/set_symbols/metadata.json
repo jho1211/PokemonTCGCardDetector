@@ -1,0 +1,182 @@
+[
+  {
+    "set_id": "sv01",
+    "set_name": "Scarlet & Violet",
+    "template_file": "sv01.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/sv/sv01/symbol"
+  },
+  {
+    "set_id": "sv02",
+    "set_name": "Paldea Evolved",
+    "template_file": "sv02.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/sv/sv02/symbol"
+  },
+  {
+    "set_id": "sv03",
+    "set_name": "Obsidian Flames",
+    "template_file": "sv03.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/sv/sv03/symbol"
+  },
+  {
+    "set_id": "sv03.5",
+    "set_name": "151",
+    "template_file": "sv03.5.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/sv/sv03.5/symbol"
+  },
+  {
+    "set_id": "sv04",
+    "set_name": "Paradox Rift",
+    "template_file": "sv04.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/sv/sv04/symbol"
+  },
+  {
+    "set_id": "sv04.5",
+    "set_name": "Paldean Fates",
+    "template_file": "sv04.5.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/sv/sv04.5/symbol"
+  },
+  {
+    "set_id": "sv05",
+    "set_name": "Temporal Forces",
+    "template_file": "sv05.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/sv/sv05/symbol"
+  },
+  {
+    "set_id": "sv06",
+    "set_name": "Twilight Masquerade",
+    "template_file": "sv06.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/sv/sv06/symbol"
+  },
+  {
+    "set_id": "sv06.5",
+    "set_name": "Shrouded Fable",
+    "template_file": "sv06.5.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/sv/sv06.5/symbol"
+  },
+  {
+    "set_id": "sv09",
+    "set_name": "Journey Together",
+    "template_file": "sv09.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/sv/sv09/symbol"
+  },
+  {
+    "set_id": "sv10",
+    "set_name": "Destined Rivals",
+    "template_file": "sv10.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/sv/sv10/symbol"
+  },
+  {
+    "set_id": "sv10.5b",
+    "set_name": "Black Bolt",
+    "template_file": "sv10.5b.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/sv/sv10.5b/symbol"
+  },
+  {
+    "set_id": "sv10.5w",
+    "set_name": "White Flare",
+    "template_file": "sv10.5w.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/sv/sv10.5w/symbol"
+  },
+  {
+    "set_id": "swsh1",
+    "set_name": "Sword & Shield",
+    "template_file": "swsh1.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/swsh/swsh1/symbol"
+  },
+  {
+    "set_id": "swsh10",
+    "set_name": "Astral Radiance",
+    "template_file": "swsh10.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/swsh/swsh10/symbol"
+  },
+  {
+    "set_id": "swsh10.5",
+    "set_name": "Pok\u00e9mon GO",
+    "template_file": "swsh10.5.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/swsh/swsh10.5/symbol"
+  },
+  {
+    "set_id": "swsh11",
+    "set_name": "Lost Origin",
+    "template_file": "swsh11.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/swsh/swsh11/symbol"
+  },
+  {
+    "set_id": "swsh12",
+    "set_name": "Silver Tempest",
+    "template_file": "swsh12.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/swsh/swsh12/symbol"
+  },
+  {
+    "set_id": "swsh12.5",
+    "set_name": "Crown Zenith",
+    "template_file": "swsh12.5.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/swsh/swsh12.5/symbol"
+  },
+  {
+    "set_id": "swsh2",
+    "set_name": "Rebel Clash",
+    "template_file": "swsh2.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/swsh/swsh2/symbol"
+  },
+  {
+    "set_id": "swsh3",
+    "set_name": "Darkness Ablaze",
+    "template_file": "swsh3.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/swsh/swsh3/symbol"
+  },
+  {
+    "set_id": "swsh3.5",
+    "set_name": "Champion's Path",
+    "template_file": "swsh3.5.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/swsh/swsh3.5/symbol"
+  },
+  {
+    "set_id": "swsh4",
+    "set_name": "Vivid Voltage",
+    "template_file": "swsh4.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/swsh/swsh4/symbol"
+  },
+  {
+    "set_id": "swsh4.5",
+    "set_name": "Shining Fates",
+    "template_file": "swsh4.5.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/swsh/swsh4.5/symbol"
+  },
+  {
+    "set_id": "swsh5",
+    "set_name": "Battle Styles",
+    "template_file": "swsh5.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/swsh/swsh5/symbol"
+  },
+  {
+    "set_id": "swsh6",
+    "set_name": "Chilling Reign",
+    "template_file": "swsh6.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/swsh/swsh6/symbol"
+  },
+  {
+    "set_id": "swsh7",
+    "set_name": "Evolving Skies",
+    "template_file": "swsh7.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/swsh/swsh7/symbol"
+  },
+  {
+    "set_id": "swsh8",
+    "set_name": "Fusion Strike",
+    "template_file": "swsh8.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/swsh/swsh8/symbol"
+  },
+  {
+    "set_id": "swsh9",
+    "set_name": "Brilliant Stars",
+    "template_file": "swsh9.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/swsh/swsh9/symbol"
+  },
+  {
+    "set_id": "swshp",
+    "set_name": "SWSH Black Star Promos",
+    "template_file": "swshp.png",
+    "symbol_url": "https://assets.tcgdex.net/univ/swsh/swshp/symbol"
+  }
+]

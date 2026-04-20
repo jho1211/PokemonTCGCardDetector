@@ -1,368 +1,299 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from contextvars import ContextVar, Token
-from pathlib import Path
+import contextvars
 import os
+import time
 import uuid
-from collections.abc import Iterable
+from dataclasses import dataclass
+from pathlib import Path
 
 import cv2
 import numpy as np
 
+from app.services.detector import CardDetection, get_card_detector
+
+CARD_RATIO_WIDTH_MM = 63.0
+CARD_RATIO_HEIGHT_MM = 88.0
+CARD_TARGET_WIDTH = int(os.getenv("CARD_TARGET_WIDTH", "630"))
+CARD_TARGET_HEIGHT = int(round(CARD_TARGET_WIDTH * (CARD_RATIO_HEIGHT_MM / CARD_RATIO_WIDTH_MM)))
+MAX_DETECTED_CARDS = int(os.getenv("MAX_DETECTED_CARDS", "6"))
+
+_DEBUG_SAVE_TRANSFORMS = os.getenv("DEBUG_SAVE_TRANSFORMS", "0").strip().lower() in {"1", "true", "yes", "on"}
+_DEBUG_ROOT = Path(os.getenv("DEBUG_IMAGE_DIR", str(Path(__file__).resolve().parents[2] / "debug_outputs")))
+_DEBUG_SESSION_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar("debug_session_id", default=None)
+
 
 @dataclass
-class PreprocessResult:
+class PreprocessedCard:
     image: np.ndarray
     score: float
     detected_card: bool
-    contour_confidence: float = 0.0
+    detection_confidence: float | None = None
+    source: str = "none"
 
 
-DEBUG_IMAGE_DIR = Path(__file__).resolve().parents[1] / "images"
-SAVE_DEBUG_IMAGES = os.getenv("DEBUG_SAVE_TRANSFORMS", "1").lower() not in {"0", "false", "no"}
-DEBUG_IMAGE_SESSION: ContextVar[str | None] = ContextVar("debug_image_session", default=None)
-
-CARD_RATIO = 63.0 / 88.0
-WARP_WIDTH = 756
-WARP_HEIGHT = 1056
+def begin_debug_image_session(prefix: str) -> str:
+    session_id = f"{prefix}_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+    _DEBUG_SESSION_ID.set(session_id)
+    return session_id
 
 
-def _save_debug_image(prefix: str, stage: str, image: np.ndarray) -> None:
-    if not SAVE_DEBUG_IMAGES or image is None or image.size == 0:
-        return
-
-    DEBUG_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
-    filename = f"{prefix}_{stage}.png"
-    path = DEBUG_IMAGE_DIR / filename
-    cv2.imwrite(str(path), image)
+def end_debug_image_session(session_id: str) -> None:
+    current = _DEBUG_SESSION_ID.get()
+    if current == session_id:
+        _DEBUG_SESSION_ID.set(None)
 
 
-def begin_debug_image_session(prefix: str) -> Token[str | None]:
-    return DEBUG_IMAGE_SESSION.set(prefix)
+def decode_image(image_bytes: bytes) -> np.ndarray:
+    array = np.frombuffer(image_bytes, dtype=np.uint8)
+    image = cv2.imdecode(array, cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError("Unable to decode image data")
+    return image
 
 
-def end_debug_image_session(token: Token[str | None]) -> None:
-    DEBUG_IMAGE_SESSION.reset(token)
+def detect_and_warp_card(image: np.ndarray) -> PreprocessedCard:
+    cards = detect_and_warp_cards(image, max_cards=1)
+    if cards:
+        return cards[0]
+
+    # Fall back to resized original image so OCR can still run in degraded mode.
+    return PreprocessedCard(
+        image=_resize_to_canvas(image),
+        score=0.0,
+        detected_card=False,
+        detection_confidence=None,
+        source="fallback",
+    )
 
 
-def _debug_prefix() -> str:
-    current = DEBUG_IMAGE_SESSION.get()
-    if current:
-        return current
-    return f"{uuid.uuid4().hex[:10]}_{os.getpid()}"
+def detect_and_warp_cards(image: np.ndarray, max_cards: int | None = None) -> list[PreprocessedCard]:
+    detector = get_card_detector()
+    detection_limit = max_cards if max_cards is not None else MAX_DETECTED_CARDS
+
+    detections = detector.detect(image)
+    _save_debug_image("00_input", image)
+
+    cards: list[PreprocessedCard] = []
+    for idx, detection in enumerate(detections[:detection_limit]):
+        warped, preprocess_score = _warp_detection(image, detection)
+        if warped is None:
+            continue
+
+        _save_debug_image(f"10_warped_{idx}", warped)
+        cards.append(
+            PreprocessedCard(
+                image=warped,
+                score=preprocess_score,
+                detected_card=True,
+                detection_confidence=detection.confidence,
+                source="yolo",
+            )
+        )
+
+    if cards:
+        cards.sort(key=lambda item: item.score, reverse=True)
+        return cards
+
+    contour = _detect_largest_quad_contour(image)
+    if contour is None:
+        return []
+
+    corners, contour_score = contour
+    warped = _warp_from_corners(image, corners)
+    if warped is None:
+        return []
+
+    _save_debug_image("11_warped_contour", warped)
+    return [
+        PreprocessedCard(
+            image=warped,
+            score=contour_score,
+            detected_card=True,
+            detection_confidence=None,
+            source="contour_fallback",
+        )
+    ]
+
+
+def rotate_image_90(image: np.ndarray, turns: int) -> np.ndarray:
+    normalized_turns = turns % 4
+    if normalized_turns == 0:
+        return image
+    return np.ascontiguousarray(np.rot90(image, k=normalized_turns))
+
+
+def extract_regions(card_image: np.ndarray) -> dict[str, list[np.ndarray]]:
+    # Modern English layouts generally keep these fields in stable zones after rectification.
+    number_regions = [
+        _crop_by_norm(card_image, 0.05, 0.90, 0.35, 0.985),
+        _crop_by_norm(card_image, 0.16, 0.90, 0.48, 0.985),
+        _crop_by_norm(card_image, 0.62, 0.90, 0.96, 0.985),
+        _crop_by_norm(card_image, 0.05, 0.87, 0.42, 0.965),
+    ]
+
+    name_regions = [
+        _crop_by_norm(card_image, 0.06, 0.03, 0.70, 0.12),
+        _crop_by_norm(card_image, 0.16, 0.03, 0.84, 0.12),
+        _crop_by_norm(card_image, 0.07, 0.05, 0.78, 0.15),
+    ]
+
+    symbol_regions = [
+        _crop_by_norm(card_image, 0.74, 0.80, 0.94, 0.92),
+        _crop_by_norm(card_image, 0.70, 0.78, 0.96, 0.93),
+        _crop_by_norm(card_image, 0.62, 0.80, 0.88, 0.93),
+    ]
+
+    return {
+        "number": [crop for crop in number_regions if crop.size > 0],
+        "name": [crop for crop in name_regions if crop.size > 0],
+        "symbol": [crop for crop in symbol_regions if crop.size > 0],
+    }
+
+
+def _warp_detection(image: np.ndarray, detection: CardDetection) -> tuple[np.ndarray | None, float]:
+    refined_corners = _refine_quad_corners_from_bbox(image, detection.bbox)
+    corners = refined_corners if refined_corners is not None else detection.corners
+
+    warped = _warp_from_corners(image, corners)
+    if warped is None:
+        return None, 0.0
+
+    corner_quality = 1.0 if refined_corners is not None else 0.85
+    score = (0.75 * detection.confidence) + (0.25 * corner_quality)
+    return warped, float(max(0.0, min(1.0, score)))
+
+
+def _warp_from_corners(image: np.ndarray, corners: np.ndarray) -> np.ndarray | None:
+    if corners.shape != (4, 2):
+        return None
+
+    src = _order_quad_points(corners.astype(np.float32))
+    dst = np.array(
+        [
+            [0, 0],
+            [CARD_TARGET_WIDTH - 1, 0],
+            [CARD_TARGET_WIDTH - 1, CARD_TARGET_HEIGHT - 1],
+            [0, CARD_TARGET_HEIGHT - 1],
+        ],
+        dtype=np.float32,
+    )
+
+    matrix = cv2.getPerspectiveTransform(src, dst)
+    warped = cv2.warpPerspective(image, matrix, (CARD_TARGET_WIDTH, CARD_TARGET_HEIGHT), flags=cv2.INTER_LINEAR)
+    if warped is None or warped.size == 0:
+        return None
+    return warped
 
 
 def _order_quad_points(points: np.ndarray) -> np.ndarray:
-    pts = np.asarray(points, dtype=np.float32).reshape(4, 2)
-    center = pts.mean(axis=0)
-    angles = np.arctan2(pts[:, 1] - center[1], pts[:, 0] - center[0])
-    ordered = pts[np.argsort(angles)]
+    ordered = np.zeros((4, 2), dtype=np.float32)
 
-    top_left_index = int(np.argmin(ordered.sum(axis=1)))
-    ordered = np.roll(ordered, -top_left_index, axis=0)
+    sums = points.sum(axis=1)
+    diffs = np.diff(points, axis=1)
 
-    if np.cross(ordered[1] - ordered[0], ordered[2] - ordered[0]) < 0:
-        ordered[[1, 3]] = ordered[[3, 1]]
+    ordered[0] = points[np.argmin(sums)]
+    ordered[2] = points[np.argmax(sums)]
+    ordered[1] = points[np.argmin(diffs)]
+    ordered[3] = points[np.argmax(diffs)]
 
     return ordered
 
 
-def _warp_card(image: np.ndarray, quad: np.ndarray) -> np.ndarray:
-    ordered = _order_quad_points(quad)
-    width, height = WARP_WIDTH, WARP_HEIGHT
-    target = np.array(
-        [[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]],
-        dtype=np.float32,
-    )
-    matrix = cv2.getPerspectiveTransform(ordered, target)
-    return cv2.warpPerspective(image, matrix, (width, height))
-
-
-def _extract_quad_from_contour(contour: np.ndarray) -> np.ndarray | None:
-    if contour is None or len(contour) < 4:
-        return None
-
-    perimeter = cv2.arcLength(contour, True)
-    approx = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
-    if len(approx) == 4:
-        quad = approx.reshape(4, 2).astype(np.float32)
-        if cv2.isContourConvex(quad.astype(np.int32)):
-            return quad
-
-    rect = cv2.minAreaRect(contour)
-    box = cv2.boxPoints(rect)
-    return box.astype(np.float32)
-
-
-def _quad_metrics(quad: np.ndarray) -> tuple[float, float, float, np.ndarray]:
-    ordered = _order_quad_points(quad)
-    width_top = float(np.linalg.norm(ordered[1] - ordered[0]))
-    width_bottom = float(np.linalg.norm(ordered[2] - ordered[3]))
-    height_left = float(np.linalg.norm(ordered[3] - ordered[0]))
-    height_right = float(np.linalg.norm(ordered[2] - ordered[1]))
-
-    width = max(width_top, width_bottom)
-    height = max(height_left, height_right)
-    if width <= 1.0 or height <= 1.0:
-        return 0.0, 0.0, 0.0, ordered
-
-    longer = max(width, height)
-    shorter = min(width, height)
-    aspect_ratio = shorter / longer
-    return width, height, aspect_ratio, ordered
-
-
-def _quad_score(quad: np.ndarray, contour: np.ndarray, image_shape: tuple[int, int]) -> tuple[float, float] | None:
-    image_h, image_w = image_shape
-    image_area = float(image_h * image_w)
-
-    width, height, aspect_ratio, ordered = _quad_metrics(quad)
-    if width <= 1.0 or height <= 1.0:
-        return None
-
-    quad_area = float(cv2.contourArea(ordered.astype(np.float32)))
-    contour_area = float(cv2.contourArea(contour.astype(np.float32)))
-    if quad_area <= 1.0 or contour_area <= 1.0:
-        return None
-
-    area_ratio = quad_area / max(image_area, 1.0)
-    if area_ratio < 0.1:
-        return None
-
-    rectangularity = float(np.clip(contour_area / quad_area, 0.0, 1.0))
-    ratio_error = abs(aspect_ratio - CARD_RATIO)
-
-    quad_center = ordered.mean(axis=0)
-    image_center = np.array([image_w / 2.0, image_h / 2.0], dtype=np.float32)
-    center_distance = float(np.linalg.norm(quad_center - image_center))
-    center_distance_norm = center_distance / max(np.hypot(image_w, image_h), 1.0)
-
-    min_x = float(np.min(ordered[:, 0]))
-    min_y = float(np.min(ordered[:, 1]))
-    max_x = float(np.max(ordered[:, 0]))
-    max_y = float(np.max(ordered[:, 1]))
-    border_margin = min(min_x, min_y, image_w - max_x, image_h - max_y)
-    border_margin_norm = float(np.clip(border_margin / max(min(image_w, image_h), 1.0), 0.0, 1.0))
-
-    score = 0.0
-    score += 3.0 * area_ratio
-    score += 2.0 * max(0.0, 1.0 - (ratio_error / 0.30))
-    score += 1.1 * rectangularity
-    score += 1.2 * max(0.0, 1.0 - (center_distance_norm * 4.0))
-    score += 0.6 * border_margin_norm
-
-    confidence = float(np.clip((score - 1.0) / 5.0, 0.0, 1.0))
-    return score, confidence
-
-
-def _resize_for_detection(image: np.ndarray, max_side: int = 1400) -> tuple[np.ndarray, float]:
-    h, w = image.shape[:2]
-    current_max = max(h, w)
-    if current_max <= max_side:
-        return image, 1.0
-
-    scale = max_side / float(current_max)
-    resized = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-    return resized, scale
-
-
-def _build_edge_maps(gray: np.ndarray) -> list[np.ndarray]:
+def _detect_largest_quad_contour(image: np.ndarray) -> tuple[np.ndarray, float] | None:
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    bilateral = cv2.bilateralFilter(gray, 7, 70, 70)
+    edges = cv2.Canny(blurred, 50, 150)
 
-    canny_soft = cv2.Canny(blurred, 50, 150)
-    canny_strong = cv2.Canny(blurred, 70, 190)
-    adaptive = cv2.adaptiveThreshold(
-        bilateral,
-        255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY,
-        31,
-        5,
-    )
-    adaptive_edges = cv2.Canny(adaptive, 30, 120)
-    closed = cv2.morphologyEx(adaptive_edges, cv2.MORPH_CLOSE, np.ones((3, 3), dtype=np.uint8), iterations=1)
-
-    return [canny_soft, canny_strong, closed]
-
-
-def _iter_candidate_contours(edge_maps: Iterable[np.ndarray]) -> list[np.ndarray]:
-    candidates: list[np.ndarray] = []
-    for edge_map in edge_maps:
-        contours, _ = cv2.findContours(edge_map, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
-            continue
-
-        candidates.extend(sorted(contours, key=cv2.contourArea, reverse=True)[:250])
-
-    return candidates
-
-
-def _crop_ratio(image: np.ndarray, top: float, bottom: float, left: float, right: float) -> np.ndarray:
-    h, w = image.shape[:2]
-    y0 = int(np.clip(top * h, 0, h - 1))
-    y1 = int(np.clip(bottom * h, y0 + 1, h))
-    x0 = int(np.clip(left * w, 0, w - 1))
-    x1 = int(np.clip(right * w, x0 + 1, w))
-    return image[y0:y1, x0:x1]
-
-
-def rotate_image_90(card_image: np.ndarray, turns_clockwise: int) -> np.ndarray:
-    turns = turns_clockwise % 4
-    if turns == 0:
-        return card_image
-    if turns == 1:
-        return cv2.rotate(card_image, cv2.ROTATE_90_CLOCKWISE)
-    if turns == 2:
-        return cv2.rotate(card_image, cv2.ROTATE_180)
-    return cv2.rotate(card_image, cv2.ROTATE_90_COUNTERCLOCKWISE)
-
-
-def decode_image(image_bytes: bytes) -> np.ndarray:
-    arr = np.frombuffer(image_bytes, dtype=np.uint8)
-    decoded = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if decoded is None:
-        raise ValueError("Unable to decode image bytes")
-
-    _save_debug_image(_debug_prefix(), "01_decoded", decoded)
-    return decoded
-
-
-def detect_and_warp_card(image: np.ndarray) -> PreprocessResult:
-    prefix = _debug_prefix()
-    _save_debug_image(prefix, "01_input", image)
-
-    resized, scale = _resize_for_detection(image)
-    gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
-    _save_debug_image(prefix, "02_gray", gray)
-
-    edge_maps = _build_edge_maps(gray)
-    for idx, edge_map in enumerate(edge_maps, start=1):
-        _save_debug_image(prefix, f"03_edges_{idx}", edge_map)
-
-    contours = _iter_candidate_contours(edge_maps)
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
-        _save_debug_image(prefix, "04_no_contours", image)
-        return PreprocessResult(image=image, score=0.2, detected_card=False, contour_confidence=0.0)
+        return None
 
+    image_area = float(image.shape[0] * image.shape[1])
     best_quad: np.ndarray | None = None
-    best_score = float("-inf")
-    best_confidence = 0.0
+    best_score = 0.0
 
     for contour in contours:
-        if len(contour) < 4:
+        perimeter = cv2.arcLength(contour, True)
+        approx = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
+        if len(approx) != 4:
             continue
 
-        candidate_quad = _extract_quad_from_contour(contour)
-        if candidate_quad is None:
+        area = cv2.contourArea(approx)
+        if area < image_area * 0.05:
             continue
 
-        result = _quad_score(candidate_quad, contour, gray.shape[:2])
-        if result is None:
-            continue
+        corners = approx.reshape(4, 2).astype(np.float32)
 
-        score, confidence = result
+        x, y, w, h = cv2.boundingRect(approx)
+        ratio = w / max(1, h)
+        aspect_delta = min(abs(ratio - (CARD_RATIO_WIDTH_MM / CARD_RATIO_HEIGHT_MM)), abs(ratio - (CARD_RATIO_HEIGHT_MM / CARD_RATIO_WIDTH_MM)))
+        aspect_score = max(0.0, 1.0 - (aspect_delta / 0.9))
+
+        area_score = min(1.0, area / image_area)
+        score = (0.6 * area_score) + (0.4 * aspect_score)
+
         if score > best_score:
             best_score = score
-            best_quad = candidate_quad
-            best_confidence = confidence
+            best_quad = corners
 
     if best_quad is None:
-        _save_debug_image(prefix, "04_no_quad", image)
-        return PreprocessResult(image=image, score=0.25, detected_card=False, contour_confidence=0.0)
+        return None
 
-    best_quad_original = best_quad / max(scale, 1e-8)
-
-    debug_overlay = image.copy()
-    overlay_quad = best_quad_original.reshape((-1, 1, 2)).astype(np.int32)
-    cv2.polylines(debug_overlay, [overlay_quad], isClosed=True, color=(0, 255, 0), thickness=4)
-    _save_debug_image(prefix, "04_contour_overlay", debug_overlay)
-
-    warped = _warp_card(image, best_quad_original)
-    _save_debug_image(prefix, "05_warped", warped)
-    score = float(np.clip(0.35 + (best_confidence * 0.65), 0.0, 1.0))
-
-    return PreprocessResult(
-        image=warped,
-        score=score,
-        detected_card=True,
-        contour_confidence=best_confidence,
-    )
+    return best_quad, float(max(0.0, min(1.0, best_score)))
 
 
-def extract_regions(card_image: np.ndarray) -> dict[str, list[np.ndarray]]:
-    prefix = _debug_prefix()
+def _refine_quad_corners_from_bbox(image: np.ndarray, bbox: tuple[int, int, int, int]) -> np.ndarray | None:
+    height, width = image.shape[:2]
+    x1, y1, x2, y2 = bbox
 
-    number_windows = [
-        (0.87, 0.975, 0.02, 0.66),
-        (0.885, 0.97, 0.03, 0.58),
-        (0.86, 0.965, 0.01, 0.72),
-        (0.89, 0.985, 0.00, 0.50),
-    ]
-    name_windows = [
-        (0.015, 0.11, 0.14, 0.76),
-        (0.01, 0.13, 0.09, 0.82),
-        (0.02, 0.12, 0.18, 0.70),
-    ]
-    symbol_windows = [
-        (0.76, 0.91, 0.67, 0.93),
-        (0.74, 0.94, 0.62, 0.96),
-    ]
+    pad_x = int((x2 - x1) * 0.08)
+    pad_y = int((y2 - y1) * 0.08)
 
-    number_rois = [_crop_ratio(card_image, *window) for window in number_windows]
-    name_rois = [_crop_ratio(card_image, *window) for window in name_windows]
-    symbol_rois = [_crop_ratio(card_image, *window) for window in symbol_windows]
+    left = max(0, x1 - pad_x)
+    top = max(0, y1 - pad_y)
+    right = min(width, x2 + pad_x)
+    bottom = min(height, y2 + pad_y)
 
-    for idx, roi in enumerate(number_rois, start=1):
-        _save_debug_image(prefix, f"06_number_roi_{idx}", roi)
-    for idx, roi in enumerate(name_rois, start=1):
-        _save_debug_image(prefix, f"07_name_roi_{idx}", roi)
-    for idx, roi in enumerate(symbol_rois, start=1):
-        _save_debug_image(prefix, f"08_symbol_roi_{idx}", roi)
+    if right - left < 20 or bottom - top < 20:
+        return None
 
-    return {
-        "number": number_rois,
-        "name": name_rois,
-        "symbol": symbol_rois,
-    }
+    roi = image[top:bottom, left:right]
+    contour = _detect_largest_quad_contour(roi)
+    if contour is None:
+        return None
+
+    corners, _ = contour
+    corners[:, 0] += left
+    corners[:, 1] += top
+    return corners
 
 
-def prepare_for_ocr(image: np.ndarray, invert: bool = False, save_debug: bool = True) -> np.ndarray:
-    prefix = _debug_prefix()
-    if save_debug:
-        _save_debug_image(prefix, "09_ocr_input", image)
+def _resize_to_canvas(image: np.ndarray) -> np.ndarray:
+    return cv2.resize(image, (CARD_TARGET_WIDTH, CARD_TARGET_HEIGHT), interpolation=cv2.INTER_LINEAR)
 
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    if save_debug:
-        _save_debug_image(prefix, "10_ocr_gray", gray)
 
-    h, w = gray.shape[:2]
-    scale = 2.0 if min(h, w) < 180 else 1.5
-    resized = cv2.resize(gray, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_CUBIC)
-    if save_debug:
-        _save_debug_image(prefix, "11_ocr_resized", resized)
+def _crop_by_norm(image: np.ndarray, x1: float, y1: float, x2: float, y2: float) -> np.ndarray:
+    h, w = image.shape[:2]
 
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(resized)
-    denoised = cv2.bilateralFilter(clahe, 7, 75, 75)
-    if save_debug:
-        _save_debug_image(prefix, "12_ocr_denoised", denoised)
+    left = max(0, min(w - 1, int(round(x1 * w))))
+    top = max(0, min(h - 1, int(round(y1 * h))))
+    right = max(left + 1, min(w, int(round(x2 * w))))
+    bottom = max(top + 1, min(h, int(round(y2 * h))))
 
-    thresh = cv2.adaptiveThreshold(
-        denoised,
-        255,
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY,
-        31,
-        5,
-    )
-    if invert:
-        thresh = cv2.bitwise_not(thresh)
+    return image[top:bottom, left:right]
 
-    if save_debug:
-        _save_debug_image(prefix, "13_ocr_thresh", thresh)
 
-    prepared = cv2.cvtColor(thresh, cv2.COLOR_GRAY2BGR)
-    if save_debug:
-        _save_debug_image(prefix, "14_ocr_prepared", prepared)
-    return prepared
+def _save_debug_image(name: str, image: np.ndarray) -> None:
+    if not _DEBUG_SAVE_TRANSFORMS:
+        return
+
+    session_id = _DEBUG_SESSION_ID.get()
+    if not session_id:
+        return
+
+    output_dir = _DEBUG_ROOT / session_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    output_path = output_dir / f"{name}.png"
+    cv2.imwrite(str(output_path), image)

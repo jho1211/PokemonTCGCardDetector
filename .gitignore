@@ -2,6 +2,8 @@
 __pycache__/
 *.pyc
 .venv/
+backend/data/
+runs/
 
 # Node / React Native
 node_modules/

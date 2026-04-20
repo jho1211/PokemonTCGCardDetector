@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from typing import Any
 
 from tcgdexsdk import Query, TCGdex  # type: ignore[reportMissingImports]
@@ -82,6 +83,8 @@ async def _fetch_card_details(card_id: str) -> Any | None:
 async def search_cards(
     collector_number: str | None,
     card_name: str | None,
+    set_id: str | None = None,
+    collection_name: str | None = None,
     limit: int = 20,
 ) -> tuple[list[Any], str | None]:
     query_candidates: list[Query] = []
@@ -126,7 +129,57 @@ async def search_cards(
     for original, fetched in zip(deduped, fetched_cards, strict=False):
         full_cards.append(fetched or original)
 
-    return full_cards, query_debug
+    filtered = _filter_cards_by_set(full_cards, set_id=set_id, collection_name=collection_name)
+
+    if query_debug:
+        set_bits: list[str] = []
+        if set_id:
+            set_bits.append(f"set_id={set_id}")
+        if collection_name:
+            set_bits.append(f"collection_name={collection_name}")
+        if set_bits:
+            query_debug = f"{query_debug}&{'&'.join(set_bits)}"
+    elif set_id or collection_name:
+        set_bits = []
+        if set_id:
+            set_bits.append(f"set_id={set_id}")
+        if collection_name:
+            set_bits.append(f"collection_name={collection_name}")
+        query_debug = "&".join(set_bits)
+
+    return filtered, query_debug
+
+
+def _filter_cards_by_set(cards: list[Any], set_id: str | None, collection_name: str | None) -> list[Any]:
+    normalized_set_id = _normalize_set_value(set_id)
+    normalized_collection = _normalize_set_value(collection_name)
+
+    if not normalized_set_id and not normalized_collection:
+        return cards
+
+    filtered: list[Any] = []
+    for card in cards:
+        set_data = _get_field(card, "set", {})
+        card_set_id = _normalize_set_value(_get_field(set_data, "id"))
+        card_set_name = _normalize_set_value(_get_field(set_data, "name"))
+
+        if normalized_set_id and normalized_set_id == card_set_id:
+            filtered.append(card)
+            continue
+
+        if normalized_collection and normalized_collection in card_set_name:
+            filtered.append(card)
+
+    return filtered
+
+
+def _normalize_set_value(value: Any) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip().lower()
+    if not text:
+        return ""
+    return re.sub(r"\s+", " ", text)
 
 
 def map_to_frontend_fields(payload: Any) -> dict[str, Any]:
@@ -140,6 +193,7 @@ def map_to_frontend_fields(payload: Any) -> dict[str, Any]:
     return {
         "id": _get_field(payload, "id", "unknown"),
         "name": _get_field(payload, "name", "Unknown Card"),
+        "set_id": _get_field(set_data, "id", ""),
         "collection": _get_field(set_data, "name", "Unknown Set"),
         "collector_number": _get_field(payload, "localId", "Unknown"),
         "image_url": _get_field(payload, "image", ""),

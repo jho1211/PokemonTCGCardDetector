@@ -6,3 +6,4 @@ opencv-python-headless==4.10.0.84
 paddleocr==3.4.1
 paddlepaddle==3.3.1
 tcgdex-sdk==2.3.0
+ultralytics==8.4.40
