@@ -23,25 +23,6 @@ def _coerce_cache(value: str) -> bool | str:
     raise ValueError("--cache must be one of: True, False, ram, disk")
 
 
-def _build_train_kwargs(args: argparse.Namespace) -> dict[str, Any]:
-    return {
-        "task": "obb",
-        "data": str(Path(args.data).resolve()),
-        "epochs": int(args.epochs),
-        "imgsz": int(args.imgsz),
-        "batch": _coerce_batch(args.batch),
-        "device": str(args.device).strip() if str(args.device).strip() else None,
-        "workers": int(args.workers),
-        "project": str(Path(args.project).resolve()),
-        "name": str(args.name),
-        "patience": int(args.patience),
-        "seed": int(args.seed),
-        "deterministic": bool(args.deterministic),
-        "cache": _coerce_cache(args.cache),
-        "verbose": True,
-    }
-
-
 def _main() -> int:
     data_path = Path("D:/Documents/GitHub/PokemonTCGCardDetector/backend/data/obb_synth/dataset.yaml").resolve()
     if not data_path.exists():
@@ -50,7 +31,7 @@ def _main() -> int:
     from ultralytics import YOLO  # type: ignore[reportMissingImports]
 
     model = YOLO("D:/Documents/GitHub/PokemonTCGCardDetector/backend/data/yolo26n-obb.pt")
-    result = model.train(data=data_path, epochs=100, imgsz=640, device=0)
+    result = model.train(data=data_path, epochs=100, imgsz=640, device=0, patience=5, batch=-1, cache="ram")
 
     print("\nTraining finished")
     save_dir = getattr(result, "save_dir", None)
