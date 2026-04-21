@@ -1,26 +1,5 @@
 from __future__ import annotations
-
-import argparse
 from pathlib import Path
-from typing import Any
-
-
-def _coerce_batch(value: str) -> int | str:
-    cleaned = str(value).strip().lower()
-    if cleaned == "auto":
-        return "auto"
-    return int(cleaned)
-
-
-def _coerce_cache(value: str) -> bool | str:
-    cleaned = str(value).strip().lower()
-    if cleaned in {"true", "1", "yes", "on"}:
-        return True
-    if cleaned in {"false", "0", "no", "off"}:
-        return False
-    if cleaned in {"ram", "disk"}:
-        return cleaned
-    raise ValueError("--cache must be one of: True, False, ram, disk")
 
 
 def _main() -> int:
@@ -31,7 +10,7 @@ def _main() -> int:
     from ultralytics import YOLO  # type: ignore[reportMissingImports]
 
     model = YOLO("D:/Documents/GitHub/PokemonTCGCardDetector/backend/data/yolo26n-obb.pt")
-    result = model.train(data=data_path, epochs=100, imgsz=640, device=0, patience=5, batch=-1, cache="ram")
+    result = model.train(data=data_path, epochs=100, imgsz=640, device=0, patience=5, batch=-1)
 
     print("\nTraining finished")
     save_dir = getattr(result, "save_dir", None)
