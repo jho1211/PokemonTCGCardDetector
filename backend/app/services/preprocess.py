@@ -1,26 +1,23 @@
 from __future__ import annotations
 
-import contextvars
-import os
 import time
 import uuid
 from dataclasses import dataclass
-from pathlib import Path
 
 import cv2
 import numpy as np
 
 from app.services.detector import CardDetection, get_card_detector
-
-CARD_RATIO_WIDTH_MM = 63.0
-CARD_RATIO_HEIGHT_MM = 88.0
-CARD_TARGET_WIDTH = int(os.getenv("CARD_TARGET_WIDTH", "630"))
-CARD_TARGET_HEIGHT = int(round(CARD_TARGET_WIDTH * (CARD_RATIO_HEIGHT_MM / CARD_RATIO_WIDTH_MM)))
-MAX_DETECTED_CARDS = int(os.getenv("MAX_DETECTED_CARDS", "6"))
-
-_DEBUG_SAVE_TRANSFORMS = os.getenv("DEBUG_SAVE_TRANSFORMS", "0").strip().lower() in {"1", "true", "yes", "on"}
-_DEBUG_ROOT = Path(os.getenv("DEBUG_IMAGE_DIR", str(Path(__file__).resolve().parents[2] / "debug_outputs")))
-_DEBUG_SESSION_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar("debug_session_id", default=None)
+from app.config.config import (
+    CARD_TARGET_WIDTH, 
+    CARD_TARGET_HEIGHT, 
+    CARD_RATIO_WIDTH_MM, 
+    CARD_RATIO_HEIGHT_MM, 
+    MAX_DETECTED_CARDS,
+    _DEBUG_SESSION_ID,
+    _DEBUG_ROOT,
+    _DEBUG_SAVE_TRANSFORMS
+)
 
 
 @dataclass

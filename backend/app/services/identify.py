@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -18,13 +16,7 @@ from app.services.preprocess import (
 from app.services.symbol_matcher import SymbolMatchResult, get_symbol_matcher
 from app.services.tcgdex import map_to_frontend_fields, search_cards
 
-MAX_ROTATIONS = max(1, min(4, int(os.getenv("OCR_ROTATION_STEPS", "4"))))
-MAX_NUMBER_CROPS = max(1, min(4, int(os.getenv("OCR_MAX_NUMBER_CROPS", "4"))))
-MAX_NAME_CROPS = max(1, min(3, int(os.getenv("OCR_MAX_NAME_CROPS", "3"))))
-MAX_SYMBOL_CROPS = max(1, min(3, int(os.getenv("OCR_MAX_SYMBOL_CROPS", "3"))))
-MAX_DB_RESULTS = max(5, int(os.getenv("IDENTIFY_DB_RESULT_LIMIT", "20")))
-MIN_ACCEPTED_CONFIDENCE = float(os.getenv("IDENTIFY_MIN_CONFIDENCE", "0.50"))
-
+from app.config.config import MAX_DB_RESULTS, MAX_NAME_CROPS, MAX_NUMBER_CROPS, MAX_ROTATIONS, MAX_SYMBOL_CROPS, MIN_ACCEPTED_CONFIDENCE
 
 @dataclass
 class _CardAnalysis:

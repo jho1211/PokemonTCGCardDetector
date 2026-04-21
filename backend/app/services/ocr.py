@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
@@ -9,6 +8,8 @@ from typing import Any, Sequence
 
 import cv2
 import numpy as np
+
+from app.config.config import PADDLEOCR_LANG
 
 try:
     from paddleocr import PaddleOCR  # type: ignore[reportMissingImports]
@@ -27,9 +28,7 @@ class OCRFieldResult:
 
 class OCRService:
     def __init__(self) -> None:
-        self.lang = os.getenv("PADDLEOCR_LANG", "en")
-        self.use_angle_cls = os.getenv("PADDLEOCR_USE_ANGLE_CLS", "1").strip().lower() in {"1", "true", "yes", "on"}
-        self.use_gpu = os.getenv("PADDLEOCR_USE_GPU", "0").strip().lower() in {"1", "true", "yes", "on"}
+        self.lang = PADDLEOCR_LANG
 
         self._reader: Any | None = None
         self.is_available = False
@@ -45,14 +44,9 @@ class OCRService:
             return
 
         try:
-            self._reader = PaddleOCR(
-                use_angle_cls=self.use_angle_cls,
-                lang=self.lang,
-                show_log=False,
-                use_gpu=self.use_gpu,
-            )
+            self._reader = PaddleOCR(lang=self.lang,)
             self.is_available = True
-            logger.info("PaddleOCR initialized (lang=%s, use_gpu=%s)", self.lang, self.use_gpu)
+            logger.info("PaddleOCR initialized (lang=%s)", self.lang)
         except Exception as exc:  # pragma: no cover - runtime environment issue
             self.last_init_error = str(exc)
             self.is_available = False

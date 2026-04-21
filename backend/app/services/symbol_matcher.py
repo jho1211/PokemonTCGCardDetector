@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
 import cv2
 import numpy as np
+
+from app.config.config import METADATA_PATH, SET_SYMBOL_MIN_SCORE, SET_SYMBOL_TEMPLATE_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +33,9 @@ class SymbolMatchResult:
 
 class SymbolTemplateMatcher:
     def __init__(self) -> None:
-        self.template_root = Path(os.getenv("SET_SYMBOL_TEMPLATE_DIR", str(DEFAULT_TEMPLATE_ROOT)))
-        self.metadata_path = Path(os.getenv("SET_SYMBOL_METADATA", str(DEFAULT_METADATA_PATH)))
-        self.min_match_score = float(os.getenv("SET_SYMBOL_MIN_SCORE", "0.45"))
+        self.template_root = SET_SYMBOL_TEMPLATE_DIR
+        self.metadata_path = METADATA_PATH
+        self.min_match_score = SET_SYMBOL_MIN_SCORE
 
         self.templates: list[_TemplateEntry] = []
         self.is_available = False

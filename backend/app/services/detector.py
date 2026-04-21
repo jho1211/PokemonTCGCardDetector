@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
 import numpy as np
+
+from app.config.config import YOLO_CONFIDENCE, YOLO_DEVICE, YOLO_IOU, YOLO_MAX_DETECTIONS, YOLO_MODEL_PATH
 
 try:
     from ultralytics import YOLO  # type: ignore[reportMissingImports]
@@ -30,11 +31,11 @@ class CardDetection:
 
 class YoloCardDetector:
     def __init__(self) -> None:
-        self.model_path = os.getenv("YOLO_MODEL_PATH", "yolo11n.pt")
-        self.conf_threshold = float(os.getenv("YOLO_CONFIDENCE", "0.2"))
-        self.iou_threshold = float(os.getenv("YOLO_IOU", "0.45"))
-        self.max_detections = int(os.getenv("YOLO_MAX_DETECTIONS", "8"))
-        self.device = os.getenv("YOLO_DEVICE", "cpu")
+        self.model_path = YOLO_MODEL_PATH
+        self.conf_threshold = YOLO_CONFIDENCE
+        self.iou_threshold = YOLO_IOU
+        self.max_detections = YOLO_MAX_DETECTIONS
+        self.device = YOLO_DEVICE
 
         self.model: Any | None = None
         self.is_available = False

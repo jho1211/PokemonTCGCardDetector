@@ -1,24 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 from typing import Any
 
 from tcgdexsdk import Query, TCGdex  # type: ignore[reportMissingImports]
 
-
-def _resolve_base_url() -> str:
-    base_url = os.getenv("TCGDEX_BASE_URL", "https://api.tcgdex.net/v2")
-    base_url = base_url.rstrip("/")
-    if base_url.endswith("/en"):
-        base_url = base_url[:-3]
-    return base_url
-
-
 TCGDEX_CLIENT = TCGdex()
-TCGDEX_CLIENT.setEndpoint(_resolve_base_url())
-
 
 def _safe_float(value: Any) -> float | None:
     if value is None:
