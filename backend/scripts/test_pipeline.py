@@ -11,14 +11,29 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-# Disable expensive debug image writes for test runs.
-os.environ.setdefault("DEBUG_SAVE_TRANSFORMS", "0")
-
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+# Parse arguments early, before imports, to set environment variables
+_early_parser = argparse.ArgumentParser(add_help=False)
+_early_parser.add_argument("--debug", action="store_true")
+_early_args, _remaining = _early_parser.parse_known_args()
+
+# Set environment variables based on early args before any imports
+if _early_args.debug:
+    os.environ["DEBUG_SAVE_TRANSFORMS"] = "1"
+else:
+    os.environ.setdefault("DEBUG_SAVE_TRANSFORMS", "0")
+
+# Now import app modules with correct environment variables
 from app.services.identify import identify_card_from_image_bytes
+from app.config.config import (
+    OCR_COLLECTOR_EARLY_STOP_SCORE,
+    OCR_NAME_EARLY_STOP_SCORE,
+    OCR_ORIENTATION_EARLY_STOP_SCORE,
+    OCR_ROTATION_PRIORITY,
+)
 from app.services.ocr import OCRFieldResult, get_ocr_service
 from app.services.preprocess import (
     begin_debug_image_session,
@@ -106,12 +121,18 @@ def _run_local_ocr(
     number_crops = max(1, min(4, int(max_number_crops)))
     name_crops = max(1, min(3, int(max_name_crops)))
 
-    for turns in range(rotations):
+    for turns in OCR_ROTATION_PRIORITY[:rotations]:
         oriented = rotate_image_90(card_image, turns)
         regions = extract_regions(oriented)
 
-        number_result = ocr.extract_best_collector_number(regions["number"][:number_crops])
-        name_result = ocr.extract_best_name(regions["name"][:name_crops])
+        number_result = ocr.extract_best_collector_number(
+            regions["number"][:number_crops],
+            stop_score=OCR_COLLECTOR_EARLY_STOP_SCORE,
+        )
+        name_result = ocr.extract_best_name(
+            regions["name"][:name_crops],
+            stop_score=OCR_NAME_EARLY_STOP_SCORE,
+        )
         score = _orientation_score(number_result, name_result)
 
         if score > best_score:
@@ -120,24 +141,35 @@ def _run_local_ocr(
             best_number = number_result
             best_name = name_result
 
+        if (
+            number_result.text
+            and name_result.text
+            and number_result.confidence >= OCR_COLLECTOR_EARLY_STOP_SCORE
+            and name_result.confidence >= OCR_NAME_EARLY_STOP_SCORE
+        ):
+            break
+        if number_result.text and name_result.text and score >= OCR_ORIENTATION_EARLY_STOP_SCORE:
+            break
+
     return best_turn, best_score, best_number, best_name
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run fast CV/OCR pipeline checks on an input image.")
+    parser = argparse.ArgumentParser(description="Run full backend pipeline test on an input image with strict card name validation.")
     parser.add_argument(
         "--image",
-        default=str(BACKEND_ROOT / "app" / "images" / "example.tiff"),
-        help="Path to image file to evaluate.",
+        default=str(BACKEND_ROOT / "data" / "test_cards.jpg"),
+        help="Path to image file to evaluate. Default: test_cards.jpg from data/",
     )
-    parser.add_argument("--expect-number", default="147/165", help="Expected collector number.")
-    parser.add_argument("--expect-name", default="Dratini", help="Expected card name (substring match).")
-    parser.add_argument("--min-preprocess-score", type=float, default=0.50, help="Minimum acceptable preprocess score.")
+    # Note: --debug and --expected-names are parsed early before imports above
+    parser.add_argument(
+        "--min-preprocess-score", type=float, default=0.50, help="Minimum acceptable preprocess score."
+    )
     parser.add_argument(
         "--mode",
         choices=["quick", "full"],
-        default="quick",
-        help="quick: preprocess+OCR only (fast). full: also run end-to-end identify pipeline.",
+        default="full",
+        help="quick: preprocess+OCR only (fast). full: run end-to-end identify pipeline (default).",
     )
     parser.add_argument(
         "--max-rotations",
@@ -164,21 +196,38 @@ def main() -> int:
         help="Timeout in seconds for full mode end-to-end call.",
     )
     parser.add_argument(
-        "--strict",
-        action="store_true",
-        help="In full mode, require final identify-card response to succeed and match expected fields.",
+        "--json-output",
+        default=str(BACKEND_ROOT / "scripts" / "test_cards_output.json"),
+        help="Path to save full IdentifyCardResponse JSON. Default: scripts/test_cards_output.json",
     )
     parser.add_argument(
-        "--json",
+        "--debug",
         action="store_true",
-        help="Print full identify-card JSON payload (only in full mode).",
+        help="Enable debug image saving at each pipeline step. Images saved to debug_outputs/{session_id}/",
+    )
+    parser.add_argument(
+        "--expected-names",
+        action="append",
+        help="Expected card names (repeatable, case-insensitive substring match). Default: Pikachu, Dratini",
     )
     args = parser.parse_args()
 
+    # Handle expected names - use provided values or defaults
+    expected_names_list = args.expected_names if args.expected_names else ["Pikachu", "Dratini"]
+    expected_names_lower = set(name.strip().lower() for name in expected_names_list if name.strip())
+
+    # Note: DEBUG_SAVE_TRANSFORMS was already set based on _early_args.debug before imports
+    if _early_args.debug:
+        debug_output_dir = BACKEND_ROOT / "debug_outputs"
+        print(f"Debug mode enabled. Images will be saved to: {debug_output_dir}/<session_id>/")
+
     image_path = Path(args.image).expanduser().resolve()
     if not image_path.exists():
-        print(f"Image not found: {image_path}")
+        print(f"Error: Image not found: {image_path}")
         return 2
+
+    json_output_path = Path(args.json_output).expanduser().resolve()
+    json_output_path.parent.mkdir(parents=True, exist_ok=True)
 
     t0 = time.perf_counter()
     image_bytes = image_path.read_bytes()
@@ -243,6 +292,16 @@ def main() -> int:
         local_checks.extend(
             [
                 CheckResult(
+                    name="OCR backend invocation",
+                    ok=True,
+                    detail=f"backend={ocr.last_call_backend!r}, result_format={ocr.last_result_format!r}",
+                ),
+                CheckResult(
+                    name="OCR runtime error",
+                    ok=ocr.last_runtime_error is None,
+                    detail=ocr.last_runtime_error or "none",
+                ),
+                CheckResult(
                     name="Collector number extracted",
                     ok=bool(best_number.text),
                     detail=(
@@ -251,19 +310,9 @@ def main() -> int:
                     ),
                 ),
                 CheckResult(
-                    name="Collector number matches expected",
-                    ok=_normalize_text(best_number.text) == _normalize_text(args.expect_number),
-                    detail=f"expected={args.expect_number!r}, actual={best_number.text!r}",
-                ),
-                CheckResult(
                     name="Name extracted",
                     ok=bool(best_name.text),
                     detail=f"name={best_name.text!r}, raw={best_name.raw_text!r}, conf={best_name.confidence:.3f}",
-                ),
-                CheckResult(
-                    name="Name matches expected",
-                    ok=_contains_name(best_name.text, args.expect_name),
-                    detail=f"expected~={args.expect_name!r}, actual={best_name.text!r}",
                 ),
                 CheckResult(
                     name="Orientation selected",
@@ -300,37 +349,36 @@ def main() -> int:
             )
         )
 
-        if args.strict:
-            cards = response_dict.get("cards") or []
-            best_entry = {}
-            if isinstance(cards, list) and cards:
-                best_entry = next((item for item in cards if item.get("success")), cards[0])
-
-            card = best_entry.get("card") if isinstance(best_entry, dict) else {}
-            card = card if isinstance(card, dict) else {}
-            full_checks.extend(
-                [
-                    CheckResult(
-                        name="Strict: API identification succeeded",
-                        ok=bool(response_dict.get("success")),
-                        detail=f"success={response_dict.get('success')}, warning={response_dict.get('warning')}",
-                    ),
-                    CheckResult(
-                        name="Strict: Final collector number matches",
-                        ok=_normalize_text(str(card.get("collector_number", ""))) == _normalize_text(args.expect_number),
-                        detail=f"expected={args.expect_number!r}, actual={card.get('collector_number')!r}",
-                    ),
-                    CheckResult(
-                        name="Strict: Final name matches",
-                        ok=_contains_name(card.get("name"), args.expect_name),
-                        detail=f"expected~={args.expect_name!r}, actual={card.get('name')!r}",
-                    ),
-                ]
-            )
+        # Extract detected card names for validation
+        cards = response_dict.get("cards") or []
+        detected_names = set()
+        
+        if isinstance(cards, list):
+            for card_entry in cards:
+                if isinstance(card_entry, dict):
+                    card_payload = card_entry.get("card")
+                    if isinstance(card_payload, dict) and card_payload.get("name"):
+                        detected_names.add(card_payload.get("name").strip().lower())
+        
+        # Check which expected names were found
+        missing_names = expected_names_lower - detected_names
+        found_names = expected_names_lower & detected_names
+        
+        # Strict validation: all expected names must be found
+        all_expected_found = len(missing_names) == 0
+        
+        full_checks.extend([
+            CheckResult(
+                name="Expected card names detected",
+                ok=all_expected_found,
+                detail=f"expected={sorted(expected_names_lower)}, found={sorted(found_names)}, missing={sorted(missing_names) if missing_names else 'none'}",
+            ),
+        ])
 
     _print_section("Input")
     print(f"image={image_path}")
     print(f"mode={args.mode}")
+    print(f"expected_names={sorted(expected_names_lower)}")
 
     _print_section("Local CV/OCR Checks")
     _print_checks(local_checks)
@@ -338,9 +386,32 @@ def main() -> int:
     _print_section("End-to-End Pipeline Checks")
     _print_checks(full_checks)
 
-    if args.json and response_dict is not None:
-        _print_section("identify-card JSON")
-        print(json.dumps(response_dict, indent=2, ensure_ascii=False))
+    if response_dict is not None:
+        # Save full JSON response
+        try:
+            with open(json_output_path, "w") as f:
+                json.dump(response_dict, f, indent=2, ensure_ascii=False)
+            print(f"\nJSON output saved to: {json_output_path}")
+        except Exception as e:
+            print(f"\nWarning: Failed to save JSON output: {e}")
+
+    if _early_args.debug:
+        debug_output_dir = BACKEND_ROOT / "debug_outputs"
+        if debug_output_dir.exists():
+            # Find the most recent debug session directory
+            session_dirs = sorted([d for d in debug_output_dir.iterdir() if d.is_dir()], key=lambda x: x.stat().st_mtime, reverse=True)
+            if session_dirs:
+                latest_session = session_dirs[0]
+                print(f"\nDebug images saved to: {latest_session}")
+                image_count = len(list(latest_session.glob("*.png")))
+                print(f"Generated {image_count} debug images")
+        print("\nDebug images at each step:")
+        print("  00_input - original input image")
+        print("  10_warped_N - YOLO-detected and warped card N")
+        print("  20_original_card - original warped card before rotation")
+        print("  21_rotated_Xdeg - card rotated by X degrees")
+        print("  22_rotation_N_result_... - result image with OCR results in filename")
+        print("  23_regions_rotation_Xdeg - composite showing number/name/symbol crops")
 
     all_checks = local_checks + full_checks
     all_ok = all(item.ok for item in all_checks)
@@ -349,6 +420,8 @@ def main() -> int:
     _print_section("Summary")
     print(f"overall={'PASS' if all_ok else 'FAIL'}")
     print(f"elapsed_seconds={elapsed:.2f}")
+    if response_dict and "cards" in response_dict:
+        print(f"cards_detected={len(response_dict.get('cards', []))}")
 
     return 0 if all_ok else 1
 

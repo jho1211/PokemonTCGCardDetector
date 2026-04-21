@@ -24,12 +24,17 @@ class CardDebugInfo(BaseModel):
     detection_confidence: float | None = None
     preprocess_score: float | None = None
     orientation_degrees: int | None = None
+    rotation_attempts: int | None = None
+    ocr_available: bool | None = None
     ocr_number: str | None = None
     ocr_number_raw: str | None = None
     ocr_number_confidence: float | None = None
     ocr_name: str | None = None
     ocr_name_raw: str | None = None
     ocr_name_confidence: float | None = None
+    ocr_backend: str | None = None
+    ocr_result_format: str | None = None
+    ocr_runtime_error: str | None = None
     set_match: str | None = None
     set_match_score: float | None = None
     query_debug: str | None = None

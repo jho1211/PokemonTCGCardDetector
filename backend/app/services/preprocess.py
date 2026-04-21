@@ -294,3 +294,12 @@ def _save_debug_image(name: str, image: np.ndarray) -> None:
 
     output_path = output_dir / f"{name}.png"
     cv2.imwrite(str(output_path), image)
+
+
+def save_debug_image(name: str, image: np.ndarray) -> None:
+    """Public wrapper to save debug images during pipeline execution.
+    
+    Enable debug image saving by setting DEBUG_SAVE_TRANSFORMS=1 environment variable.
+    Images are saved to DEBUG_IMAGE_DIR (default: backend/debug_outputs/{session_id}/).
+    """
+    _save_debug_image(name, image)

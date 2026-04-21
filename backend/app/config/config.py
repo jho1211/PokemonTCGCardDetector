@@ -5,7 +5,44 @@ import contextvars
 
 dotenv.load_dotenv()
 
+
+def _parse_bool(value: str | None, default: bool) -> bool:
+	if value is None:
+		return default
+	return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_rotation_priority(raw: str | None) -> tuple[int, ...]:
+	preferred: list[int] = []
+	if raw:
+		for token in raw.split(","):
+			token = token.strip()
+			if not token:
+				continue
+			try:
+				turns = int(token)
+			except ValueError:
+				continue
+			if turns < 0 or turns > 3 or turns in preferred:
+				continue
+			preferred.append(turns)
+
+	for fallback in (0, 2, 1, 3):
+		if fallback not in preferred:
+			preferred.append(fallback)
+
+	return tuple(preferred[:4])
+
 PADDLEOCR_LANG = os.getenv("PADDLEOCR_LANG", "en")
+PADDLEOCR_ENABLE_MKLDNN = _parse_bool(os.getenv("PADDLEOCR_ENABLE_MKLDNN"), False)
+PADDLEOCR_USE_DOC_ORIENTATION_CLASSIFY = _parse_bool(os.getenv("PADDLEOCR_USE_DOC_ORIENTATION_CLASSIFY"), False)
+PADDLEOCR_USE_DOC_UNWARPING = _parse_bool(os.getenv("PADDLEOCR_USE_DOC_UNWARPING"), False)
+PADDLEOCR_USE_TEXTLINE_ORIENTATION = _parse_bool(os.getenv("PADDLEOCR_USE_TEXTLINE_ORIENTATION"), False)
+
+OCR_ROTATION_PRIORITY = _parse_rotation_priority(os.getenv("OCR_ROTATION_PRIORITY", "0,2,1,3"))
+OCR_COLLECTOR_EARLY_STOP_SCORE = float(os.getenv("OCR_COLLECTOR_EARLY_STOP_SCORE", "0.98"))
+OCR_NAME_EARLY_STOP_SCORE = float(os.getenv("OCR_NAME_EARLY_STOP_SCORE", "0.96"))
+OCR_ORIENTATION_EARLY_STOP_SCORE = float(os.getenv("OCR_ORIENTATION_EARLY_STOP_SCORE", "0.90"))
 
 YOLO_MODEL_PATH = os.getenv("YOLO_MODEL_PATH", "yolo11n.pt")
 YOLO_CONFIDENCE = float(os.getenv("YOLO_CONFIDENCE", "0.2"))
