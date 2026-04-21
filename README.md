@@ -13,6 +13,9 @@ This repository now includes the first implementation slice for both backend and
 cd backend
 python3 -m venv .venv
 source .venv/bin/activate
+
+pip install torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu118
+
 pip install -r requirements.txt
 ```
 
