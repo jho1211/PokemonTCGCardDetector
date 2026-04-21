@@ -19,28 +19,17 @@ pip install torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 --index-url https
 pip install -r requirements.txt
 ```
 
+.env file
+```
+YOLO_MODEL_PATH="data/yolo26n-obb-pokemon-card.pt"
+PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
+```
+
+
 ### Run
 
 ```bash
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-### PaddleOCR In Restricted Networks
-
-If model hosters are blocked, PaddleOCR may fail to initialize and all scans can return `success: false`.
-
-Set this before startup to bypass hoster connectivity checks:
-
-```bash
-export PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
-```
-
-If you have downloaded models locally, point PaddleOCR to them:
-
-```bash
-export PADDLEOCR_DET_MODEL_DIR=/absolute/path/to/ch_PP-OCRv4_det_infer
-export PADDLEOCR_REC_MODEL_DIR=/absolute/path/to/en_PP-OCRv4_rec_infer
-export PADDLEOCR_CLS_MODEL_DIR=/absolute/path/to/ch_ppocr_mobile_v2.0_cls_infer
 ```
 
 Then start the API:
