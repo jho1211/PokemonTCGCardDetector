@@ -135,11 +135,8 @@ def extract_regions(card_image: np.ndarray) -> dict[str, list[np.ndarray]]:
         _crop_by_norm(card_image, 0.07, 0.05, 0.78, 0.15),
     ]
 
-    symbol_regions = [
-        _crop_by_norm(card_image, 0.74, 0.80, 0.94, 0.92),
-        _crop_by_norm(card_image, 0.70, 0.78, 0.96, 0.93),
-        _crop_by_norm(card_image, 0.62, 0.80, 0.88, 0.93),
-    ]
+    # Set symbol is usually adjacent to collector number; share the same ROI candidates.
+    symbol_regions = list(number_regions)
 
     return {
         "number": [crop for crop in number_regions if crop.size > 0],

@@ -66,6 +66,35 @@ def _contains_name(actual: str | None, expected: str | None) -> bool:
     return expected.strip().lower() in actual.strip().lower()
 
 
+def _parse_expected_template_sets(values: list[str] | None) -> dict[str, str]:
+    if not values:
+        return {
+            "pikachu": "sv03.5",
+            "dratini": "sv03.5",
+        }
+
+    parsed: dict[str, str] = {}
+    for raw in values:
+        item = raw.strip()
+        if "=" not in item:
+            raise ValueError(
+                f"Invalid --expected-template-set value {raw!r}. Use NAME=SET_ID (example: Pikachu=sv03.5)."
+            )
+
+        name_raw, set_id_raw = item.split("=", 1)
+        name = name_raw.strip().lower()
+        set_id = set_id_raw.strip().lower()
+
+        if not name or not set_id:
+            raise ValueError(
+                f"Invalid --expected-template-set value {raw!r}. Name and set ID must both be non-empty."
+            )
+
+        parsed[name] = set_id
+
+    return parsed
+
+
 def _ocr_result_strength(result: OCRFieldResult, collector_field: bool) -> float:
     score = float(result.confidence)
     if result.text:
@@ -210,11 +239,25 @@ def main() -> int:
         action="append",
         help="Expected card names (repeatable, case-insensitive substring match). Default: Pikachu, Dratini",
     )
+    parser.add_argument(
+        "--expected-template-set",
+        action="append",
+        help=(
+            "Expected template set match in NAME=SET_ID form (repeatable). "
+            "Default: Pikachu=sv03.5 and Dratini=sv03.5"
+        ),
+    )
     args = parser.parse_args()
 
     # Handle expected names - use provided values or defaults
     expected_names_list = args.expected_names if args.expected_names else ["Pikachu", "Dratini"]
     expected_names_lower = set(name.strip().lower() for name in expected_names_list if name.strip())
+
+    try:
+        expected_template_sets = _parse_expected_template_sets(args.expected_template_set)
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return 2
 
     # Note: DEBUG_SAVE_TRANSFORMS was already set based on _early_args.debug before imports
     if _early_args.debug:
@@ -352,13 +395,30 @@ def main() -> int:
         # Extract detected card names for validation
         cards = response_dict.get("cards") or []
         detected_names = set()
+        template_matches_by_name: dict[str, list[str | None]] = {}
         
         if isinstance(cards, list):
             for card_entry in cards:
-                if isinstance(card_entry, dict):
-                    card_payload = card_entry.get("card")
-                    if isinstance(card_payload, dict) and card_payload.get("name"):
-                        detected_names.add(card_payload.get("name").strip().lower())
+                if not isinstance(card_entry, dict):
+                    continue
+
+                card_payload = card_entry.get("card")
+                debug_payload = card_entry.get("debug")
+
+                candidate_name: str | None = None
+                if isinstance(card_payload, dict) and card_payload.get("name"):
+                    candidate_name = str(card_payload.get("name")).strip().lower()
+                    detected_names.add(candidate_name)
+                elif isinstance(debug_payload, dict) and debug_payload.get("ocr_name"):
+                    candidate_name = str(debug_payload.get("ocr_name")).strip().lower()
+
+                if candidate_name:
+                    set_match: str | None = None
+                    if isinstance(debug_payload, dict):
+                        raw_set_match = debug_payload.get("set_match")
+                        if isinstance(raw_set_match, str) and raw_set_match.strip():
+                            set_match = raw_set_match.strip().lower()
+                    template_matches_by_name.setdefault(candidate_name, []).append(set_match)
         
         # Check which expected names were found
         missing_names = expected_names_lower - detected_names
@@ -366,6 +426,18 @@ def main() -> int:
         
         # Strict validation: all expected names must be found
         all_expected_found = len(missing_names) == 0
+
+        template_mismatches: list[str] = []
+        template_observed_summary: dict[str, list[str]] = {}
+        for expected_name, expected_set in expected_template_sets.items():
+            observed_matches = [
+                set_id for set_id in template_matches_by_name.get(expected_name, []) if isinstance(set_id, str) and set_id
+            ]
+            template_observed_summary[expected_name] = observed_matches if observed_matches else ["none"]
+            if expected_set not in observed_matches:
+                template_mismatches.append(
+                    f"{expected_name}: expected={expected_set}, observed={template_observed_summary[expected_name]}"
+                )
         
         full_checks.extend([
             CheckResult(
@@ -373,12 +445,22 @@ def main() -> int:
                 ok=all_expected_found,
                 detail=f"expected={sorted(expected_names_lower)}, found={sorted(found_names)}, missing={sorted(missing_names) if missing_names else 'none'}",
             ),
+            CheckResult(
+                name="Template set symbol matches expected",
+                ok=len(template_mismatches) == 0,
+                detail=(
+                    f"expected={expected_template_sets}, observed={template_observed_summary}"
+                    if not template_mismatches
+                    else "; ".join(template_mismatches)
+                ),
+            ),
         ])
 
     _print_section("Input")
     print(f"image={image_path}")
     print(f"mode={args.mode}")
     print(f"expected_names={sorted(expected_names_lower)}")
+    print(f"expected_template_sets={expected_template_sets}")
 
     _print_section("Local CV/OCR Checks")
     _print_checks(local_checks)
