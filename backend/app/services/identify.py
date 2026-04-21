@@ -38,6 +38,7 @@ class _CardAnalysis:
     orientation_score: float
     collector_number: OCRFieldResult
     card_name: OCRFieldResult
+    symbol_abbreviation: OCRFieldResult
     symbol_match: SymbolMatchResult
 
 
@@ -114,11 +115,16 @@ async def identify_card_from_image_bytes(image_bytes: bytes) -> IdentifyCardResp
                 ocr_name=analysis.card_name.text,
                 ocr_name_raw=analysis.card_name.raw_text,
                 ocr_name_confidence=analysis.card_name.confidence,
+                ocr_set_abbreviation=analysis.symbol_abbreviation.text,
+                ocr_set_abbreviation_raw=analysis.symbol_abbreviation.raw_text,
+                ocr_set_abbreviation_confidence=analysis.symbol_abbreviation.confidence,
                 ocr_backend=ocr.last_call_backend,
                 ocr_result_format=ocr.last_result_format,
                 ocr_runtime_error=ocr.last_runtime_error,
                 set_match=analysis.symbol_match.set_id,
                 set_match_score=analysis.symbol_match.score,
+                set_match_method=analysis.symbol_match.method,
+                set_match_token=analysis.symbol_match.token,
                 query_debug=query_debug,
             )
 
@@ -165,6 +171,7 @@ def _analyze_single_card(card_image: np.ndarray, ocr_available: bool, symbol_ava
         orientation_score=-1.0,
         collector_number=OCRFieldResult(text=None, raw_text=None, confidence=0.0),
         card_name=OCRFieldResult(text=None, raw_text=None, confidence=0.0),
+        symbol_abbreviation=OCRFieldResult(text=None, raw_text=None, confidence=0.0),
         symbol_match=SymbolMatchResult(set_id=None, set_name=None, score=0.0),
     )
 
@@ -197,14 +204,25 @@ def _analyze_single_card(card_image: np.ndarray, ocr_available: bool, symbol_ava
             number_result = OCRFieldResult(text=None, raw_text=None, confidence=0.0)
             name_result = OCRFieldResult(text=None, raw_text=None, confidence=0.0)
 
-        if symbol_available:
-            # Symbol matching is expensive; run it on first rotation and whenever OCR is already strong.
-            if rotation_index == 0 or _is_strong_ocr_pair(number_result, name_result):
-                symbol_result = symbol_matcher.match(regions["symbol"][:MAX_SYMBOL_CROPS])
-            else:
-                symbol_result = SymbolMatchResult(set_id=None, set_name=None, score=0.0)
-        else:
-            symbol_result = SymbolMatchResult(set_id=None, set_name=None, score=0.0)
+        should_evaluate_symbol = rotation_index == 0 or _is_strong_ocr_pair(number_result, name_result)
+        symbol_result = SymbolMatchResult(set_id=None, set_name=None, score=0.0)
+        symbol_abbreviation = OCRFieldResult(text=None, raw_text=None, confidence=0.0)
+
+        # Set symbol handling runs on the first rotation and later only after strong OCR fields.
+        if should_evaluate_symbol and symbol_available:
+            symbol_result = symbol_matcher.match(regions["symbol"][:MAX_SYMBOL_CROPS])
+
+        if should_evaluate_symbol and ocr_available and symbol_matcher.has_ocr_fallback and symbol_result.set_id is None:
+            symbol_abbreviation = ocr.extract_best_set_abbreviation(
+                regions["symbol"][:MAX_SYMBOL_CROPS],
+                stop_score=symbol_matcher.min_ocr_match_score,
+            )
+            fallback_match = symbol_matcher.match_ocr_abbreviation(
+                symbol_abbreviation.text,
+                symbol_abbreviation.confidence,
+            )
+            if fallback_match.set_id is not None:
+                symbol_result = fallback_match
 
         score = _orientation_score(number_result, name_result, symbol_result)
         
@@ -221,6 +239,7 @@ def _analyze_single_card(card_image: np.ndarray, ocr_available: bool, symbol_ava
                 orientation_score=score,
                 collector_number=number_result,
                 card_name=name_result,
+                symbol_abbreviation=symbol_abbreviation,
                 symbol_match=symbol_result,
             )
 

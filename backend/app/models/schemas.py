@@ -32,11 +32,16 @@ class CardDebugInfo(BaseModel):
     ocr_name: str | None = None
     ocr_name_raw: str | None = None
     ocr_name_confidence: float | None = None
+    ocr_set_abbreviation: str | None = None
+    ocr_set_abbreviation_raw: str | None = None
+    ocr_set_abbreviation_confidence: float | None = None
     ocr_backend: str | None = None
     ocr_result_format: str | None = None
     ocr_runtime_error: str | None = None
     set_match: str | None = None
     set_match_score: float | None = None
+    set_match_method: str | None = None
+    set_match_token: str | None = None
     query_debug: str | None = None
 
 

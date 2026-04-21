@@ -132,6 +132,29 @@ class OCRService:
 
         return best
 
+    def extract_best_set_abbreviation(self, crops: Sequence[np.ndarray], stop_score: float | None = None) -> OCRFieldResult:
+        if not self.is_available:
+            return OCRFieldResult(text=None, raw_text=None, confidence=0.0)
+
+        stop_threshold = _resolve_stop_score(stop_score, fallback=1.0)
+        self._reset_runtime_state()
+        best = OCRFieldResult(text=None, raw_text=None, confidence=0.0)
+
+        for crop in crops:
+            for variant in _set_abbreviation_variants(crop):
+                for raw_text, conf in self._ocr_lines(variant):
+                    normalized = _normalize_set_abbreviation(raw_text)
+                    if normalized is None:
+                        continue
+
+                    score = _set_abbreviation_score(normalized, conf)
+                    if score > best.confidence:
+                        best = OCRFieldResult(text=normalized, raw_text=raw_text, confidence=score)
+                        if best.confidence >= stop_threshold:
+                            return best
+
+        return best
+
     def _ocr_lines(self, image: np.ndarray) -> list[tuple[str, float]]:
         if self._reader is None:
             return []
@@ -311,6 +334,23 @@ def _name_variants(image: np.ndarray) -> list[np.ndarray]:
     ]
 
 
+def _set_abbreviation_variants(image: np.ndarray) -> list[np.ndarray]:
+    if image.size == 0:
+        return []
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    enlarged = cv2.resize(gray, None, fx=2.2, fy=2.2, interpolation=cv2.INTER_CUBIC)
+    blurred = cv2.GaussianBlur(enlarged, (3, 3), 0)
+    _, otsu = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    inverted = cv2.bitwise_not(otsu)
+
+    return [
+        cv2.cvtColor(enlarged, cv2.COLOR_GRAY2BGR),
+        cv2.cvtColor(otsu, cv2.COLOR_GRAY2BGR),
+        cv2.cvtColor(inverted, cv2.COLOR_GRAY2BGR),
+    ]
+
+
 def _normalize_collector_number(value: str) -> str | None:
     raw = value.upper().strip()
     if not raw:
@@ -361,6 +401,30 @@ def _normalize_name(value: str) -> str | None:
     return text
 
 
+def _normalize_set_abbreviation(value: str) -> str | None:
+    raw = value.upper().strip()
+    if not raw:
+        return None
+
+    substitutions = {
+        "0": "O",
+        "1": "I",
+        "5": "S",
+        "8": "B",
+    }
+    for old, new in substitutions.items():
+        raw = raw.replace(old, new)
+
+    raw = re.sub(r"[^A-Z0-9]", "", raw)
+    if len(raw) < 2 or len(raw) > 6:
+        return None
+
+    if not re.search(r"[A-Z]", raw):
+        return None
+
+    return raw
+
+
 def _is_low_information_name(value: str) -> bool:
     canonical = re.sub(r"[^A-Z0-9]", "", value.upper())
     if not canonical:
@@ -405,5 +469,22 @@ def _name_score(normalized: str, confidence: float) -> float:
         score += 0.06
     if _is_low_information_name(normalized):
         score -= 0.22
+
+    return float(max(0.0, min(1.0, score)))
+
+
+def _set_abbreviation_score(normalized: str, confidence: float) -> float:
+    score = max(0.0, min(1.0, confidence))
+
+    if len(normalized) == 3:
+        score += 0.16
+    elif 2 <= len(normalized) <= 5:
+        score += 0.08
+
+    if normalized.isalpha():
+        score += 0.10
+
+    if re.search(r"\d", normalized):
+        score -= 0.06
 
     return float(max(0.0, min(1.0, score)))
