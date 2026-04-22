@@ -22,6 +22,8 @@ SYMBOL_MAP = load_abbreviation_map()
 
 def parse_set_text(ocr_texts: list[str]) -> str | None:
     for text in ocr_texts:
+        # remove spaces and convert to uppercase for matching
+        text = text.replace(" ", "").upper()
         if text in SYMBOL_MAP:
             return SYMBOL_MAP[text]
     return None
@@ -29,9 +31,10 @@ def parse_set_text(ocr_texts: list[str]) -> str | None:
 
 def parse_collector_number(ocr_texts: list[str]) -> str | None:
     # if "e.g. 123/456" is in the OCR results, return it as the collector number
+    print(ocr_texts)
     for text in ocr_texts:
         if "/" in text:
-            return text.split("/")[0].strip()
+            return text
     return None
 
 

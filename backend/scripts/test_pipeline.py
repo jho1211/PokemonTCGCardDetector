@@ -9,7 +9,7 @@ if str(BACKEND_ROOT) not in sys.path:
 from app.services.detector import get_card_detector
 from app.services.preprocess import warp_cards, extract_regions
 from app.services.ocr import predict_card
-from app.services.tcgdex import get_matching_card
+from app.services.identify import get_matching_card
 
 import asyncio
 
@@ -37,7 +37,7 @@ if __name__ == "__main__":
     for warped_card in warped_cards:
         regions = extract_regions(warped_card.image)
         predicted_card = asyncio.run(predict_card(regions))
-        card = asyncio.run(get_matching_card(predicted_card))
+        card = get_matching_card(predicted_card)
 
         if card:
             cards.append(card)
