@@ -31,7 +31,6 @@ def parse_set_text(ocr_texts: list[str]) -> str | None:
 
 def parse_collector_number(ocr_texts: list[str]) -> str | None:
     # if "e.g. 123/456" is in the OCR results, return it as the collector number
-    print(ocr_texts)
     for text in ocr_texts:
         if "/" in text:
             return text
