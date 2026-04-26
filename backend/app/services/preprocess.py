@@ -1,5 +1,4 @@
 from __future__ import annotations
-from dataclasses import dataclass
 
 import cv2
 import numpy as np
@@ -9,13 +8,7 @@ from app.config.config import (
     CARD_TARGET_WIDTH, 
     CARD_TARGET_HEIGHT, 
 )
-
-
-@dataclass
-class PreprocessedCard:
-    image: np.ndarray
-    detected_card: bool
-    source: str = "none"
+from app.models.schemas import PreprocessedCard, Card
 
 
 def decode_image(image_bytes: bytes) -> np.ndarray:
@@ -26,18 +19,19 @@ def decode_image(image_bytes: bytes) -> np.ndarray:
     return image
 
 
-def warp_cards(image: np.ndarray, detections: list[CardDetection]) -> list[PreprocessedCard]:
+def warp_cards(image: np.ndarray, detections: list[CardDetection]) -> list[Card]:
     cards: list[PreprocessedCard] = []
     for detection in detections:
         warped = _warp_detection(image, detection)
         if warped is None:
             continue
         cards.append(
-            PreprocessedCard(
-                image=warped,
-                detected_card=True,
-                source="yolo",
-            )
+            Card(
+                preprocessed_card = PreprocessedCard(
+                    image=warped,
+                    detected_card=True,
+                    source="yolo",
+                ))
         )
     return cards
 
@@ -46,7 +40,7 @@ def extract_regions(card_image: np.ndarray) -> dict[str, list[np.ndarray]]:
     # Modern English layouts generally keep these fields in stable zones after rectification.
     # Set symbol is usually adjacent to collector number; share the same ROI candidates.
     return {
-        "number": _crop_by_norm(card_image, 0.05, 0.87, 0.42, 0.965),
+        "number": _crop_by_norm(card_image, 0.05, 0.87, 0.42, 0.98),
         "name": _crop_by_norm(card_image, 0.06, 0.03, 0.70, 0.12),
     }
 

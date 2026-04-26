@@ -49,8 +49,7 @@ def parse_card_name(ocr_texts: list[str]) -> str | None:
     return None
 
 
-async def predict_card(card_regions: list[np.ndarray]) -> Card:
-    card = Card()
+async def predict_card(card: Card, card_regions: list[np.ndarray]) -> Card:
     for region_name, region_crop in card_regions.items():
         result = OCR.predict(region_crop)
         for res in result:

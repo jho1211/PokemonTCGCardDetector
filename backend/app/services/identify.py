@@ -44,19 +44,16 @@ class Identifier:
             return card
         return None
     
-    def tcgtracking_query_card(self, card: Card | None) -> Card | None:
-        if card is None:
-            return None
-
+    def tcgtracking_query_card(self, card: Card) -> Card:
         set_id = card.set_id
         set_db = self.set_db.get(str(set_id), None)
         if set_db is None:
-            return None
+            return card
 
         for _card in set_db.values():
             if card.collector_number == _card.collector_number and card.name in _card.name:
                 return _card
-        return None
+        return card
 
 identifier = Identifier()
 
